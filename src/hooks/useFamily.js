@@ -1,15 +1,24 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 
+function getCachedKids(familyId) {
+  try { return JSON.parse(sessionStorage.getItem(`cq_kids_${familyId}`)) || [] } catch { return [] }
+}
+function setCachedKids(familyId, data) {
+  try { sessionStorage.setItem(`cq_kids_${familyId}`, JSON.stringify(data)) } catch {}
+}
+
 export function useFamily(familyId) {
-  const [kids,          setKids]          = useState([])
+  const cached = familyId ? getCachedKids(familyId) : []
+  const [kids,          setKids]          = useState(cached)
   const [notifications, setNotifications] = useState([])
-  const [loading,       setLoading]       = useState(true)
+  const [loading,       setLoading]       = useState(cached.length === 0) // no spinner if cached
   const [error,         setError]         = useState(null)
 
   const loadAll = useCallback(async () => {
     if (!familyId) return
-    setLoading(true)
+    // Only show spinner if we have nothing to show yet
+    if (kids.length === 0) setLoading(true)
     try {
       const [kidsRes, notifsRes] = await Promise.all([
         supabase
@@ -28,6 +37,7 @@ export function useFamily(familyId) {
       if (notifsRes.error) throw notifsRes.error
       setKids(kidsRes.data || [])
       setNotifications(notifsRes.data || [])
+      setCachedKids(familyId, kidsRes.data || [])
     } catch (err) {
       console.error('loadAll error:', err)
       setError(err.message)

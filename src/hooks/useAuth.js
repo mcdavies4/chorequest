@@ -1,9 +1,23 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 
+// Cache family in sessionStorage so refresh feels instant
+const FAMILY_CACHE_KEY = 'cq_family'
+
+function getCachedFamily() {
+  try { return JSON.parse(sessionStorage.getItem(FAMILY_CACHE_KEY)) } catch { return null }
+}
+function setCachedFamily(data) {
+  try { sessionStorage.setItem(FAMILY_CACHE_KEY, JSON.stringify(data)) } catch {}
+}
+function clearCachedFamily() {
+  try { sessionStorage.removeItem(FAMILY_CACHE_KEY) } catch {}
+}
+
 export function useAuth() {
+  const cached = getCachedFamily()
   const [user,    setUser]    = useState(null)
-  const [family,  setFamily]  = useState(null)
+  const [family,  setFamily]  = useState(cached) // start with cache = instant
   const [loading, setLoading] = useState(true)
 
   const fetchFamily = useCallback(async (userId) => {
@@ -15,6 +29,8 @@ export function useAuth() {
         .single()
       if (error && error.code !== 'PGRST116') throw error
       setFamily(data ?? null)
+      if (data) setCachedFamily(data)
+      else clearCachedFamily()
     } catch (err) {
       console.error('fetchFamily error:', err)
     } finally {
@@ -25,15 +41,23 @@ export function useAuth() {
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null)
-      if (session?.user) fetchFamily(session.user.id)
-      else setLoading(false)
+      if (session?.user) {
+        // If we have a cache, stop showing spinner immediately
+        // then refresh family in background
+        if (cached) setLoading(false)
+        fetchFamily(session.user.id)
+      } else {
+        clearCachedFamily()
+        setFamily(null)
+        setLoading(false)
+      }
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (_event, session) => {
         setUser(session?.user ?? null)
         if (session?.user) await fetchFamily(session.user.id)
-        else { setFamily(null); setLoading(false) }
+        else { setFamily(null); clearCachedFamily(); setLoading(false) }
       }
     )
     return () => subscription.unsubscribe()
@@ -42,19 +66,15 @@ export function useAuth() {
   const signUp = useCallback(async ({ email, password, parentName }) => {
     const { data, error } = await supabase.auth.signUp({ email, password })
     if (error) throw error
-
     const { data: familyData, error: familyError } = await supabase
       .from('families')
       .insert({ parent_id: data.user.id, parent_name: parentName })
       .select()
       .single()
     if (familyError) throw familyError
-
-    await supabase
-      .from('subscriptions')
-      .insert({ family_id: familyData.id, plan: 'free', status: 'active' })
-
+    await supabase.from('subscriptions').insert({ family_id: familyData.id, plan: 'free', status: 'active' })
     setFamily(familyData)
+    setCachedFamily(familyData)
     return { user: data.user, family: familyData }
   }, [])
 
@@ -68,6 +88,7 @@ export function useAuth() {
     await supabase.auth.signOut()
     setUser(null)
     setFamily(null)
+    clearCachedFamily()
   }, [])
 
   return { user, family, loading, signUp, signIn, signOut, fetchFamily }

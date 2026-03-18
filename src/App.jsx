@@ -26,14 +26,20 @@ export default function App() {
 
   const showToast = msg => setToast(msg)
 
-  // Redirect once auth resolves
+  // Redirect once auth resolves — don't wait for kids to load
   useEffect(() => {
     if (authLoading) return
     if (user && family) {
       setScreen('app')
-      if (kids.length > 0 && !activeKidId) setActiveKidId(kids[0].id)
+    } else if (!authLoading && !user) {
+      setScreen(prev => prev === 'app' || prev === 'app-kid' ? 'login' : prev)
     }
-  }, [user, family, authLoading, kids])
+  }, [user, family, authLoading])
+
+  // Set active kid once kids load
+  useEffect(() => {
+    if (kids.length > 0 && !activeKidId) setActiveKidId(kids[0].id)
+  }, [kids])
 
   // Onboarding complete
   const handleOnboardingComplete = async (result) => {
@@ -129,12 +135,15 @@ export default function App() {
 
   const activeKid = kids.find(k => k.id === activeKidId) || kids[0]
 
-  if (authLoading) {
+  // Only show full-screen loader if we have zero cached data at all
+  // (first ever load). After that, cached data renders instantly.
+  if (authLoading && !family) {
     return (
       <div style={{ minHeight: '100vh', background: '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }}>
         <style>{GLOBAL_STYLES}</style>
-        <div style={{ fontSize: 52 }}>🏆</div>
-        <div style={{ fontFamily: 'sans-serif', color: '#475569', fontWeight: 700 }}>Loading ChoreQuest...</div>
+        <div style={{ fontSize: 52, animation: 'pulse 1.5s ease infinite' }}>🏆</div>
+        <div style={{ fontFamily: "'Nunito',sans-serif", color: '#475569', fontWeight: 700, fontSize: 14 }}>Loading ChoreQuest...</div>
+        <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }`}</style>
       </div>
     )
   }
