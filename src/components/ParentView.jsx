@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { ProgressBar, CHORE_ICONS } from './shared'
+import { startCheckout, openBillingPortal } from '../lib/stripe'
 
 function WeeklySummary({ kid }) {
   const history = kid.weekly_history ?? kid.weeklyHistory ?? []
@@ -270,8 +271,6 @@ export function ParentView({ data, onApprove, onReject, onLogout, onMarkRead, on
     if (!familyId || !userEmail) { showToast('❌ Missing account info'); return }
     setCheckoutLoading(true)
     try {
-      // Dynamically import to avoid loading Stripe on every page
-      const { startCheckout } = await import('../lib/stripe')
       await startCheckout({ familyId, email: userEmail })
     } catch (err) {
       showToast(`❌ ${err.message}`)
@@ -281,7 +280,6 @@ export function ParentView({ data, onApprove, onReject, onLogout, onMarkRead, on
 
   const handleOpenPortal = async () => {
     try {
-      const { openBillingPortal } = await import('../lib/stripe')
       await openBillingPortal({ familyId })
     } catch (err) {
       showToast(`❌ ${err.message}`)
