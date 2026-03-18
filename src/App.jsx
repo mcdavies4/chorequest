@@ -1,20 +1,32 @@
+// src/App.jsx
+// ─────────────────────────────────────────────────────────────
+// Root component — now includes subscription state.
+// Passes plan/isPremium down to all views for feature gating.
+// ─────────────────────────────────────────────────────────────
+
 import { useState, useEffect } from 'react'
-import { useAuth }   from './hooks/useAuth'
-import { useFamily } from './hooks/useFamily'
-import { saveOnboarding } from './lib/onboarding'
+import { useAuth }            from './hooks/useAuth'
+import { useFamily }          from './hooks/useFamily'
+import { useSubscription }    from './hooks/useSubscription'
+import { saveOnboarding }     from './lib/onboarding'
 import { GLOBAL_STYLES, CoinBurst, Toast } from './components/shared'
-import { OnboardingFlow } from './components/OnboardingFlow'
-import { LoginScreen }    from './components/LoginScreen'
-import { KidLogin }       from './components/KidLogin'
-import { KidView }        from './components/KidView'
-import { ParentView }     from './components/ParentView'
+import { OnboardingFlow }     from './components/OnboardingFlow'
+import { LoginScreen }        from './components/LoginScreen'
+import { KidLogin }           from './components/KidLogin'
+import { KidView }            from './components/KidView'
+import { ParentView }         from './components/ParentView'
+import { SubscriptionBanner } from './components/SubscriptionBanner'
 
 export default function App() {
   const { user, family, loading: authLoading, signUp, signIn, signOut } = useAuth()
+
   const { kids, notifications, loading: dataLoading, reload,
           markChorePending, approveChore, rejectChore,
           addChore, updateChore, deleteChore, updateGoal,
           redeemReward, markNotificationRead } = useFamily(family?.id)
+
+  const { subscription, plan, isPremium, checkoutMsg,
+          clearCheckoutMsg, canAccess } = useSubscription(family?.id)
 
   const [screen,      setScreen]      = useState('onboarding')
   const [activeKidId, setActiveKidId] = useState(null)
@@ -23,6 +35,14 @@ export default function App() {
   const [toast,       setToast]       = useState(null)
 
   const showToast = msg => setToast(msg)
+
+  // Show checkout success/cancel toast
+  useEffect(() => {
+    if (!checkoutMsg) return
+    if (checkoutMsg === 'success') showToast('🎉 Welcome to Premium! All features unlocked.')
+    if (checkoutMsg === 'cancel')  showToast('Checkout cancelled — you can upgrade anytime.')
+    clearCheckoutMsg()
+  }, [checkoutMsg])
 
   // Redirect once auth resolves
   useEffect(() => {
@@ -33,14 +53,11 @@ export default function App() {
     }
   }, [user, family, authLoading, kids])
 
-  // Onboarding complete
   const handleOnboardingComplete = async (result) => {
     if (!result) { setScreen('login'); return }
     try {
       const { family: newFamily } = await signUp({
-        email:      result.email,
-        password:   result.password,
-        parentName: result.parentName,
+        email: result.email, password: result.password, parentName: result.parentName,
       })
       await saveOnboarding({ familyId: newFamily.id, kids: result.kids, selectedChores: result.selectedChores, goals: result.goals })
       await reload()
@@ -53,20 +70,14 @@ export default function App() {
 
   const handleParentLogin = async ({ email, password }) => {
     await signIn({ email, password })
-    // useAuth listener will set screen to 'app'
   }
 
   const handleKidLogin = (kid) => {
-    setKidUser(kid)
-    setActiveKidId(kid.id)
-    setScreen('app-kid')
+    setKidUser(kid); setActiveKidId(kid.id); setScreen('app-kid')
   }
 
   const handleSignOut = async () => {
-    await signOut()
-    setKidUser(null)
-    setActiveKidId(null)
-    setScreen('login')
+    await signOut(); setKidUser(null); setActiveKidId(null); setScreen('login')
   }
 
   const handleMarkDone = async (kidId, choreId, e) => {
@@ -94,6 +105,11 @@ export default function App() {
   }
 
   const handleRedeemReward = async (kidId, reward) => {
+    // Gate: reward store is premium only
+    if (!canAccess('reward_store')) {
+      showToast('🔒 Upgrade to Premium to use the Reward Store')
+      return
+    }
     try { await redeemReward(kidId, reward); showToast(`🎉 "${reward.title}" redeemed!`) }
     catch (err) { showToast(`❌ ${err.message}`) }
   }
@@ -116,6 +132,15 @@ export default function App() {
   const handleSaveGoal = async (kidId, goal) => {
     try { await updateGoal(kidId, goal.name, goal.target); showToast('🎯 Goal updated!') }
     catch (err) { showToast(`❌ ${err.message}`) }
+  }
+
+  // Gate: adding more than 1 kid is premium only
+  const handleAddKid = () => {
+    if (!canAccess('multiple_kids') && kids.length >= 1) {
+      showToast('🔒 Upgrade to Premium to add more kids')
+      return false
+    }
+    return true
   }
 
   const activeKid = kids.find(k => k.id === activeKidId) || kids[0]
@@ -148,16 +173,13 @@ export default function App() {
         )}
 
         {screen === 'kid-login' && (
-          <KidLogin
-            kids={kids}
-            onLogin={handleKidLogin}
-            onBack={() => setScreen('login')}
-          />
+          <KidLogin kids={kids} onLogin={handleKidLogin} onBack={() => setScreen('login')} />
         )}
 
         {screen === 'app-kid' && kidUser && (
           <KidView
             kid={kids.find(k => k.id === kidUser.id) || kidUser}
+            plan={plan}
             onMarkDone={handleMarkDone}
             onLogout={handleSignOut}
             onRedeemReward={handleRedeemReward}
@@ -165,19 +187,33 @@ export default function App() {
         )}
 
         {screen === 'app' && user && (
-          <ParentView
-            data={{ kids, notifications }}
-            onApprove={handleApprove}
-            onReject={handleReject}
-            onLogout={handleSignOut}
-            onMarkRead={markNotificationRead}
-            onSaveChore={handleSaveChore}
-            onDeleteChore={handleDeleteChore}
-            onSaveGoal={handleSaveGoal}
-            showToast={showToast}
-            activeKidId={activeKidId || kids[0]?.id}
-            setActiveKidId={setActiveKidId}
-          />
+          <>
+            {/* Subscription status banners */}
+            <SubscriptionBanner
+              subscription={subscription}
+              familyId={family?.id}
+              checkoutMsg={checkoutMsg}
+              onDismiss={clearCheckoutMsg}
+            />
+            <ParentView
+              data={{ kids, notifications }}
+              plan={plan}
+              isPremium={isPremium}
+              familyId={family?.id}
+              userEmail={user?.email}
+              canAccess={canAccess}
+              onApprove={handleApprove}
+              onReject={handleReject}
+              onLogout={handleSignOut}
+              onMarkRead={markNotificationRead}
+              onSaveChore={handleSaveChore}
+              onDeleteChore={handleDeleteChore}
+              onSaveGoal={handleSaveGoal}
+              showToast={showToast}
+              activeKidId={activeKidId || kids[0]?.id}
+              setActiveKidId={setActiveKidId}
+            />
+          </>
         )}
       </div>
     </>
