@@ -61,16 +61,32 @@ export function useFamily(familyId) {
   }, [familyId])
 
   const approveChore = useCallback(async (choreId, kidId, coins) => {
-    const { error: choreErr } = await supabase.from('chores').update({ done: true, pending: false }).eq('id', choreId)
+    // Step 1: mark chore as done
+    const { error: choreErr } = await supabase
+      .from('chores')
+      .update({ done: true, pending: false })
+      .eq('id', choreId)
     if (choreErr) throw choreErr
-    const kid = kids.find(k => k.id === kidId)
-    if (!kid) return
-    const { error: kidErr } = await supabase.from('kids').update({
-      balance:    +(Number(kid.balance) + coins).toFixed(2),
-      goal_saved: +(Number(kid.goal_saved) + coins).toFixed(2),
-    }).eq('id', kidId)
+
+    // Step 2: fetch fresh kid data directly from DB (avoids stale closure)
+    const { data: freshKid, error: fetchErr } = await supabase
+      .from('kids')
+      .select('id, balance, goal_saved')
+      .eq('id', kidId)
+      .single()
+    if (fetchErr) throw fetchErr
+    if (!freshKid) throw new Error('Kid not found')
+
+    // Step 3: update balance and goal_saved
+    const newBalance   = +(Number(freshKid.balance)    + Number(coins)).toFixed(2)
+    const newGoalSaved = +(Number(freshKid.goal_saved) + Number(coins)).toFixed(2)
+
+    const { error: kidErr } = await supabase
+      .from('kids')
+      .update({ balance: newBalance, goal_saved: newGoalSaved })
+      .eq('id', kidId)
     if (kidErr) throw kidErr
-  }, [kids])
+  }, [])
 
   const rejectChore = useCallback(async (choreId) => {
     const { error } = await supabase.from('chores').update({ pending: false }).eq('id', choreId)
