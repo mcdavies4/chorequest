@@ -562,11 +562,6 @@ export function ParentView({ data, onApprove, onReject, onLogout, onMarkRead, on
                 </div>
               </div>
 
-              {/* Trial badge */}
-              <div style={{ background: '#22c55e22', border: '1.5px solid #22c55e', borderRadius: 12, padding: '9px 14px', marginBottom: 18, textAlign: 'center' }}>
-                <span style={{ fontSize: 14, fontWeight: 800, color: '#22c55e' }}>🎉 14-day free trial — cancel anytime</span>
-              </div>
-
               {/* Feature list */}
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 {[
@@ -607,7 +602,7 @@ export function ParentView({ data, onApprove, onReject, onLogout, onMarkRead, on
               onClick={handleStartCheckout}
               disabled={checkoutLoading}
               style={{ width: '100%', background: checkoutLoading ? '#334155' : 'linear-gradient(135deg,#f59e0b,#f97316)', border: 'none', borderRadius: 16, padding: 16, fontFamily: "'Fredoka One',cursive", fontSize: 20, color: checkoutLoading ? '#64748b' : 'white', cursor: checkoutLoading ? 'not-allowed' : 'pointer', boxShadow: checkoutLoading ? 'none' : '0 6px 24px #f59e0b55', marginBottom: 12 }}>
-              {checkoutLoading ? 'Redirecting to Stripe...' : 'Start Free Trial 🚀'}
+              {checkoutLoading ? 'Redirecting to Stripe...' : 'Upgrade to Premium 🚀'}
             </button>
             <div style={{ textAlign: 'center', fontSize: 12, color: '#334155', fontWeight: 600 }}>
               Secured by Stripe · Cancel anytime · No hidden fees
