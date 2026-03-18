@@ -230,8 +230,9 @@ function ManageTab({ kid, onSaveChore, onDeleteChore, onSaveGoal, showToast }) {
   )
 }
 
-export function ParentView({ data, onApprove, onReject, onLogout, onMarkRead, onSaveChore, onDeleteChore, onSaveGoal, showToast, activeKidId, setActiveKidId }) {
+export function ParentView({ data, onApprove, onReject, onLogout, onMarkRead, onSaveChore, onDeleteChore, onSaveGoal, showToast, activeKidId, setActiveKidId, plan = 'free', isPremium = false, familyId, userEmail }) {
   const [tab, setTab] = useState('home')
+  const [checkoutLoading, setCheckoutLoading] = useState(false)
   const kid = data.kids.find(k => k.id === activeKidId) || data.kids[0]
   if (!kid) return null
 
@@ -242,12 +243,46 @@ export function ParentView({ data, onApprove, onReject, onLogout, onMarkRead, on
   const goalTarget   = Number(kid.goal_target ?? kid.savedGoal?.target ?? 10)
   const goalSaved    = Number(kid.goal_saved  ?? kid.savedGoal?.saved  ?? 0)
 
+  const handleStartCheckout = async () => {
+    if (!familyId || !userEmail) { showToast('❌ Missing account info'); return }
+    setCheckoutLoading(true)
+    try {
+      // Dynamically import to avoid loading Stripe on every page
+      const { startCheckout } = await import('../lib/stripe')
+      await startCheckout({ familyId, email: userEmail })
+    } catch (err) {
+      showToast(`❌ ${err.message}`)
+      setCheckoutLoading(false)
+    }
+  }
+
+  const handleOpenPortal = async () => {
+    try {
+      const { openBillingPortal } = await import('../lib/stripe')
+      await openBillingPortal({ familyId })
+    } catch (err) {
+      showToast(`❌ ${err.message}`)
+    }
+  }
+
   return (
     <div style={{ minHeight: '100vh', background: 'linear-gradient(160deg,#0f172a 0%,#1e293b 100%)', fontFamily: "'Nunito',sans-serif" }}>
       {/* Header */}
       <div style={{ padding: '20px 16px 0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div><div style={{ fontFamily: "'Fredoka One',cursive", fontSize: 24, color: 'white' }}>ChoreQuest 🏆</div><div style={{ fontSize: 11, color: '#475569', fontWeight: 600 }}>Parent Dashboard</div></div>
-        <button onClick={onLogout} style={{ background: '#1e293b', border: '1.5px solid #334155', borderRadius: 12, padding: '7px 14px', fontFamily: "'Nunito',sans-serif", fontWeight: 700, fontSize: 12, color: '#94a3b8', cursor: 'pointer' }}>Sign Out</button>
+        <div>
+          <div style={{ fontFamily: "'Fredoka One',cursive", fontSize: 24, color: 'white' }}>ChoreQuest 🏆</div>
+          <div style={{ fontSize: 11, color: '#475569', fontWeight: 600 }}>
+            {isPremium ? '⭐ Premium' : '🔒 Free Plan'}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {!isPremium && (
+            <button onClick={() => setTab('upgrade')} style={{ background: 'linear-gradient(135deg,#f59e0b,#f97316)', border: 'none', borderRadius: 12, padding: '7px 14px', fontFamily: "'Nunito',sans-serif", fontWeight: 800, fontSize: 12, color: 'white', cursor: 'pointer', boxShadow: '0 2px 12px #f59e0b44' }}>
+              ⭐ Upgrade
+            </button>
+          )}
+          <button onClick={onLogout} style={{ background: '#1e293b', border: '1.5px solid #334155', borderRadius: 12, padding: '7px 14px', fontFamily: "'Nunito',sans-serif", fontWeight: 700, fontSize: 12, color: '#94a3b8', cursor: 'pointer' }}>Sign Out</button>
+        </div>
       </div>
 
       {/* Kid tabs */}
@@ -268,8 +303,16 @@ export function ParentView({ data, onApprove, onReject, onLogout, onMarkRead, on
 
       {/* Nav */}
       <div style={{ display: 'flex', margin: '12px 16px 0', background: '#0f172a', borderRadius: 16, padding: 4, gap: 2 }}>
-        {[['home','📊'],['approve',totalPending>0?`✅${totalPending}`:'✅'],['manage','✏️'],['summary','📋'],['leaderboard','🏆'],['notifs',unread>0?`🔔${unread}`:'🔔']].map(([key,label]) => (
-          <button key={key} onClick={() => setTab(key)} style={{ flex: 1, background: tab===key?'#f59e0b':'transparent', border: 'none', borderRadius: 11, padding: '9px 2px', fontFamily: "'Nunito',sans-serif", fontWeight: 800, fontSize: 14, color: tab===key?'#1e293b':'#475569', cursor: 'pointer', transition: 'all 0.2s' }}>{label}</button>
+        {[
+          ['home',        '📊'],
+          ['approve',     totalPending > 0 ? `✅${totalPending}` : '✅'],
+          ['manage',      '✏️'],
+          ['summary',     '📋'],
+          ['leaderboard', '🏆'],
+          ['notifs',      unread > 0 ? `🔔${unread}` : '🔔'],
+          isPremium ? ['billing', '⭐'] : ['upgrade', '🔒'],
+        ].map(([key, label]) => (
+          <button key={key} onClick={() => setTab(key)} style={{ flex: 1, background: tab === key ? '#f59e0b' : 'transparent', border: 'none', borderRadius: 11, padding: '9px 2px', fontFamily: "'Nunito',sans-serif", fontWeight: 800, fontSize: 13, color: tab === key ? '#1e293b' : '#475569', cursor: 'pointer', transition: 'all 0.2s' }}>{label}</button>
         ))}
       </div>
 
@@ -362,6 +405,116 @@ export function ParentView({ data, onApprove, onReject, onLogout, onMarkRead, on
         {tab === 'manage'      && <ManageTab kid={kid} onSaveChore={onSaveChore} onDeleteChore={onDeleteChore} onSaveGoal={onSaveGoal} showToast={showToast} />}
         {tab === 'summary'     && <><div style={{ fontFamily: "'Fredoka One',cursive", fontSize: 18, color: '#f59e0b', marginBottom: 14 }}>Weekly Report 📋</div><WeeklySummary kid={kid} /></>}
         {tab === 'leaderboard' && <><div style={{ fontFamily: "'Fredoka One',cursive", fontSize: 18, color: '#f59e0b', marginBottom: 14 }}>Leaderboard 🏆</div><Leaderboard kids={data.kids} /></>}
+
+        {/* UPGRADE PAGE */}
+        {tab === 'upgrade' && (
+          <div style={{ animation: 'fadeIn 0.3s ease' }}>
+            <div style={{ textAlign: 'center', marginBottom: 24 }}>
+              <div style={{ fontSize: 56, marginBottom: 8 }}>🏆</div>
+              <div style={{ fontFamily: "'Fredoka One',cursive", fontSize: 28, color: 'white', marginBottom: 6 }}>Unlock Premium</div>
+              <div style={{ fontSize: 14, color: '#64748b', fontWeight: 600 }}>Everything your family needs</div>
+            </div>
+
+            {/* Pricing card */}
+            <div style={{ background: '#1e293b', border: '2px solid #f59e0b', borderRadius: 22, padding: 20, marginBottom: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+                <div>
+                  <div style={{ fontFamily: "'Fredoka One',cursive", fontSize: 22, color: 'white' }}>Premium</div>
+                  <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>Billed monthly</div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontFamily: "'Fredoka One',cursive", fontSize: 34, color: '#f59e0b' }}>$9.99</div>
+                  <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600 }}>per month</div>
+                </div>
+              </div>
+
+              {/* Trial badge */}
+              <div style={{ background: '#22c55e22', border: '1.5px solid #22c55e', borderRadius: 12, padding: '9px 14px', marginBottom: 18, textAlign: 'center' }}>
+                <span style={{ fontSize: 14, fontWeight: 800, color: '#22c55e' }}>🎉 14-day free trial — cancel anytime</span>
+              </div>
+
+              {/* Feature list */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                {[
+                  ['👨‍👩‍👧', 'Unlimited kids', 'Free plan is limited to 1 kid'],
+                  ['💸', 'Pay links', 'Send real money via Venmo, Cash App & PayPal'],
+                  ['🛍️', 'Reward Store', 'Kids redeem coins for privileges & treats'],
+                  ['📋', 'Weekly Reports', 'Earnings charts & completion history'],
+                  ['🏆', 'Leaderboard', 'Fun competition between siblings'],
+                  ['🔔', 'Push Notifications', 'Instant alerts on any device'],
+                ].map(([icon, title, desc]) => (
+                  <div key={title} style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                    <span style={{ fontSize: 22, flexShrink: 0 }}>{icon}</span>
+                    <div>
+                      <div style={{ fontWeight: 800, color: 'white', fontSize: 14 }}>{title}</div>
+                      <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600 }}>{desc}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Free tier comparison */}
+            <div style={{ background: '#1e293b', border: '1.5px solid #334155', borderRadius: 16, padding: '14px 16px', marginBottom: 20 }}>
+              <div style={{ fontWeight: 800, color: '#64748b', fontSize: 12, marginBottom: 10, textTransform: 'uppercase', letterSpacing: 1 }}>Your current free plan includes</div>
+              {[
+                '✅ 1 kid',
+                '✅ Basic chores & approval flow',
+                '✅ Coin balance tracker',
+                '✅ Savings goal',
+                '❌ Multiple kids',
+                '❌ Pay links, Reward Store, Reports',
+              ].map(f => (
+                <div key={f} style={{ fontSize: 13, color: f.startsWith('✅') ? '#94a3b8' : '#475569', fontWeight: 600, marginBottom: 4 }}>{f}</div>
+              ))}
+            </div>
+
+            <button
+              onClick={handleStartCheckout}
+              disabled={checkoutLoading}
+              style={{ width: '100%', background: checkoutLoading ? '#334155' : 'linear-gradient(135deg,#f59e0b,#f97316)', border: 'none', borderRadius: 16, padding: 16, fontFamily: "'Fredoka One',cursive", fontSize: 20, color: checkoutLoading ? '#64748b' : 'white', cursor: checkoutLoading ? 'not-allowed' : 'pointer', boxShadow: checkoutLoading ? 'none' : '0 6px 24px #f59e0b55', marginBottom: 12 }}>
+              {checkoutLoading ? 'Redirecting to Stripe...' : 'Start Free Trial 🚀'}
+            </button>
+            <div style={{ textAlign: 'center', fontSize: 12, color: '#334155', fontWeight: 600 }}>
+              Secured by Stripe · Cancel anytime · No hidden fees
+            </div>
+          </div>
+        )}
+
+        {/* BILLING / MANAGE SUBSCRIPTION (premium users) */}
+        {tab === 'billing' && (
+          <div style={{ animation: 'fadeIn 0.3s ease' }}>
+            <div style={{ textAlign: 'center', marginBottom: 24 }}>
+              <div style={{ fontSize: 56, marginBottom: 8 }}>⭐</div>
+              <div style={{ fontFamily: "'Fredoka One',cursive", fontSize: 26, color: 'white', marginBottom: 4 }}>You're on Premium!</div>
+              <div style={{ fontSize: 14, color: '#64748b', fontWeight: 600 }}>All features are unlocked for your family</div>
+            </div>
+
+            <div style={{ background: '#1e293b', border: '2px solid #22c55e', borderRadius: 20, padding: 18, marginBottom: 16 }}>
+              {[
+                ['👨‍👩‍👧', 'Unlimited kids', true],
+                ['💸', 'Pay links', true],
+                ['🛍️', 'Reward Store', true],
+                ['📋', 'Weekly Reports', true],
+                ['🏆', 'Leaderboard', true],
+                ['🔔', 'Push Notifications', true],
+              ].map(([icon, label]) => (
+                <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+                  <span style={{ fontSize: 20 }}>{icon}</span>
+                  <span style={{ fontWeight: 700, color: 'white', fontSize: 14, flex: 1 }}>{label}</span>
+                  <span style={{ color: '#22c55e', fontSize: 16 }}>✓</span>
+                </div>
+              ))}
+            </div>
+
+            <button onClick={handleOpenPortal} style={{ width: '100%', background: '#1e293b', border: '1.5px solid #334155', borderRadius: 16, padding: 15, fontFamily: "'Nunito',sans-serif", fontWeight: 800, fontSize: 15, color: '#94a3b8', cursor: 'pointer', marginBottom: 10 }}>
+              Manage Subscription →
+            </button>
+            <div style={{ textAlign: 'center', fontSize: 12, color: '#334155', fontWeight: 600 }}>
+              Update payment method · Cancel · Download invoices
+            </div>
+          </div>
+        )}
 
         {/* NOTIFICATIONS */}
         {tab === 'notifs' && (
