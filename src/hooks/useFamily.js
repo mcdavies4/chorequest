@@ -1,28 +1,5 @@
-// src/hooks/useFamily.js
-// ─────────────────────────────────────────────────────────────
-// Loads all family data + realtime subscriptions.
-// Also fires push notifications on key chore events:
-//   - markChorePending → notifies PARENT
-//   - approveChore     → notifies KID
-// ─────────────────────────────────────────────────────────────
-
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
-
-// Calls the send-push Edge Function
-async function sendPush({ familyId, userType, kidId = null, title, body, url, tag }) {
-  try {
-    const { data: { session } } = await supabase.auth.getSession()
-    if (!session) return
-
-    await supabase.functions.invoke('send-push', {
-      body: { family_id: familyId, user_type: userType, kid_id: kidId, title, body, url, tag },
-    })
-  } catch (err) {
-    // Push is best-effort — never block the main action
-    console.warn('Push notification failed (non-fatal):', err)
-  }
-}
 
 export function useFamily(familyId) {
   const [kids,          setKids]          = useState([])
@@ -61,7 +38,6 @@ export function useFamily(familyId) {
 
   useEffect(() => { loadAll() }, [loadAll])
 
-  // Realtime subscriptions
   useEffect(() => {
     if (!familyId) return
     const ch1 = supabase.channel('chores_rt')
@@ -73,108 +49,51 @@ export function useFamily(familyId) {
     const ch3 = supabase.channel('kids_rt')
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'kids', filter: `family_id=eq.${familyId}` }, () => loadAll())
       .subscribe()
-    return () => {
-      supabase.removeChannel(ch1)
-      supabase.removeChannel(ch2)
-      supabase.removeChannel(ch3)
-    }
+    return () => { supabase.removeChannel(ch1); supabase.removeChannel(ch2); supabase.removeChannel(ch3) }
   }, [familyId, loadAll])
 
-  // ── Mark chore pending (kid submits) → notify PARENT ─────
-  const markChorePending = useCallback(async (choreId, kidId, kidName, choreTitle) => {
-    const { error } = await supabase
-      .from('chores')
-      .update({ pending: true })
-      .eq('id', choreId)
+  const markChorePending = useCallback(async (choreId, kidId, kidName, choreTitle, explicitFamilyId) => {
+    const fid = explicitFamilyId || familyId
+    if (!fid) throw new Error('No family ID — please log in again')
+    const { error } = await supabase.from('chores').update({ pending: true }).eq('id', choreId)
     if (error) throw error
-
-    // Save in-app notification
-    await supabase.from('notifications').insert({
-      family_id: familyId,
-      kid_id:    kidId,
-      type:      'pending',
-      message:   `${kidName} completed '${choreTitle}' — needs approval`,
-    })
-
-    // 🔔 Push to parent
-    await sendPush({
-      familyId,
-      userType: 'parent',
-      title:    `${kidName} finished a chore! ✅`,
-      body:     `"${choreTitle}" is waiting for your approval`,
-      url:      '/',
-      tag:      `chore-pending-${choreId}`,
-    })
+    await supabase.from('notifications').insert({ family_id: fid, kid_id: kidId, type: 'pending', message: `${kidName} completed '${choreTitle}' — needs approval` })
   }, [familyId])
 
-  // ── Approve chore (parent approves) → notify KID ─────────
   const approveChore = useCallback(async (choreId, kidId, coins) => {
-    const { error: choreErr } = await supabase
-      .from('chores')
-      .update({ done: true, pending: false })
-      .eq('id', choreId)
+    const { error: choreErr } = await supabase.from('chores').update({ done: true, pending: false }).eq('id', choreId)
     if (choreErr) throw choreErr
-
     const kid = kids.find(k => k.id === kidId)
     if (!kid) return
-
-    const { error: kidErr } = await supabase
-      .from('kids')
-      .update({
-        balance:    +(Number(kid.balance) + coins).toFixed(2),
-        goal_saved: +(Number(kid.goal_saved) + coins).toFixed(2),
-      })
-      .eq('id', kidId)
+    const { error: kidErr } = await supabase.from('kids').update({
+      balance:    +(Number(kid.balance) + coins).toFixed(2),
+      goal_saved: +(Number(kid.goal_saved) + coins).toFixed(2),
+    }).eq('id', kidId)
     if (kidErr) throw kidErr
-
-    // 🔔 Push to kid
-    await sendPush({
-      familyId,
-      userType: 'kid',
-      kidId,
-      title:    `Chore approved! 🎉`,
-      body:     `You just earned 🪙 $${Number(coins).toFixed(2)}! Keep it up!`,
-      url:      '/',
-      tag:      `chore-approved-${choreId}`,
-    })
-  }, [kids, familyId])
+  }, [kids])
 
   const rejectChore = useCallback(async (choreId) => {
-    const { error } = await supabase
-      .from('chores')
-      .update({ pending: false })
-      .eq('id', choreId)
+    const { error } = await supabase.from('chores').update({ pending: false }).eq('id', choreId)
     if (error) throw error
   }, [])
 
   const addChore = useCallback(async (kidId, chore) => {
-    const { error } = await supabase
-      .from('chores')
-      .insert({ kid_id: kidId, family_id: familyId, title: chore.title, icon: chore.icon, coins: chore.coins })
+    const { error } = await supabase.from('chores').insert({ kid_id: kidId, family_id: familyId, title: chore.title, icon: chore.icon, coins: chore.coins })
     if (error) throw error
   }, [familyId])
 
   const updateChore = useCallback(async (choreId, updates) => {
-    const { error } = await supabase
-      .from('chores')
-      .update(updates)
-      .eq('id', choreId)
+    const { error } = await supabase.from('chores').update(updates).eq('id', choreId)
     if (error) throw error
   }, [])
 
   const deleteChore = useCallback(async (choreId) => {
-    const { error } = await supabase
-      .from('chores')
-      .delete()
-      .eq('id', choreId)
+    const { error } = await supabase.from('chores').delete().eq('id', choreId)
     if (error) throw error
   }, [])
 
   const updateGoal = useCallback(async (kidId, goalName, goalTarget) => {
-    const { error } = await supabase
-      .from('kids')
-      .update({ goal_name: goalName, goal_target: goalTarget })
-      .eq('id', kidId)
+    const { error } = await supabase.from('kids').update({ goal_name: goalName, goal_target: goalTarget }).eq('id', kidId)
     if (error) throw error
   }, [])
 

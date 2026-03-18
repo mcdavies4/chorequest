@@ -75,9 +75,16 @@ export default function App() {
     const rect = e.currentTarget.getBoundingClientRect()
     setBurst({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 })
     try {
-      const kid   = kids.find(k => k.id === kidId)
-      const chore = kid?.chores?.find(c => c.id === choreId)
-      await markChorePending(choreId, kidId, kid?.name, chore?.title)
+      // Kids log in without a parent Supabase session.
+      // We use the kid object directly from kidUser (set at login time)
+      // which includes family_id from when the parent loaded the kids list.
+      const kidData  = kids.find(k => k.id === kidId) || kidUser
+      const chore    = kidData?.chores?.find(c => c.id === choreId)
+      const famId    = kidData?.family_id || family?.id
+
+      if (!famId) { showToast('❌ Session error — please log in again'); return }
+
+      await markChorePending(choreId, kidId, kidData?.name, chore?.title, famId)
     } catch (err) { showToast(`❌ ${err.message}`) }
   }
 
