@@ -81,8 +81,12 @@ export function useAuth() {
   const signIn = useCallback(async ({ email, password }) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) throw error
+    // Eagerly set user so screen can switch immediately
+    setUser(data.user)
+    // Fetch family in background — cached version already shown if available
+    fetchFamily(data.user.id)
     return data
-  }, [])
+  }, [fetchFamily])
 
   const signOut = useCallback(async () => {
     await supabase.auth.signOut()

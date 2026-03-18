@@ -249,7 +249,15 @@ export function ParentView({ data, onApprove, onReject, onLogout, onMarkRead, on
   }
 
   const kid = data.kids.find(k => k.id === activeKidId) || data.kids[0]
-  if (!kid) return null
+
+  // Show skeleton while kids are loading — happens on first login before data arrives
+  if (!kid) return (
+    <div style={{ minHeight: '100vh', background: 'linear-gradient(160deg,#0f172a 0%,#1e293b 100%)', fontFamily: "'Nunito',sans-serif", display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+      <div style={{ fontSize: 48, animation: 'pulse 1.5s ease infinite' }}>🏆</div>
+      <div style={{ color: '#475569', fontWeight: 700, fontSize: 14 }}>Loading your dashboard...</div>
+      <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }`}</style>
+    </div>
+  )
 
   const pending      = (kid.chores||[]).filter(c => c.pending)
   const unread       = (data.notifications||[]).filter(n => !n.read).length

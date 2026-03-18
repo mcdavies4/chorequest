@@ -26,15 +26,15 @@ export default function App() {
 
   const showToast = msg => setToast(msg)
 
-  // Redirect once auth resolves — don't wait for kids to load
+  // Redirect as soon as user is known — don't wait for family fetch
   useEffect(() => {
-    if (authLoading) return
-    if (user && family) {
+    if (authLoading && !family) return // only block on true first load
+    if (user) {
       setScreen('app')
     } else if (!authLoading && !user) {
       setScreen(prev => prev === 'app' || prev === 'app-kid' ? 'login' : prev)
     }
-  }, [user, family, authLoading])
+  }, [user, authLoading])
 
   // Set active kid once kids load
   useEffect(() => {
@@ -60,8 +60,11 @@ export default function App() {
   }
 
   const handleParentLogin = async ({ email, password }) => {
-    await signIn({ email, password })
-    // useAuth listener will set screen to 'app'
+    const { user: signedInUser } = await signIn({ email, password })
+    // Switch screen immediately — don't wait for useEffect chain
+    // family comes from cache instantly if available, otherwise
+    // useEffect will handle it once fetchFamily resolves
+    if (signedInUser) setScreen('app')
   }
 
   const handleKidLogin = (kid) => {
