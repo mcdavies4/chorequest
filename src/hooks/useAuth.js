@@ -1,23 +1,19 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
 
-// Cache family in sessionStorage so refresh feels instant
-const FAMILY_CACHE_KEY = 'cq_family'
-
 function getCachedFamily() {
-  try { return JSON.parse(sessionStorage.getItem(FAMILY_CACHE_KEY)) } catch { return null }
+  try { return JSON.parse(sessionStorage.getItem('cq_family')) } catch { return null }
 }
 function setCachedFamily(data) {
-  try { sessionStorage.setItem(FAMILY_CACHE_KEY, JSON.stringify(data)) } catch {}
+  try { sessionStorage.setItem('cq_family', JSON.stringify(data)) } catch {}
 }
 function clearCachedFamily() {
-  try { sessionStorage.removeItem(FAMILY_CACHE_KEY) } catch {}
+  try { sessionStorage.removeItem('cq_family') } catch {}
 }
 
 export function useAuth() {
-  const cached = getCachedFamily()
   const [user,    setUser]    = useState(null)
-  const [family,  setFamily]  = useState(cached) // start with cache = instant
+  const [family,  setFamily]  = useState(getCachedFamily)
   const [loading, setLoading] = useState(true)
 
   const fetchFamily = useCallback(async (userId) => {
@@ -39,13 +35,16 @@ export function useAuth() {
   }, [])
 
   useEffect(() => {
+    let mounted = true
+
     supabase.auth.getSession().then(({ data: { session } }) => {
-      setUser(session?.user ?? null)
-      if (session?.user) {
-        // If we have a cache, stop showing spinner immediately
-        // then refresh family in background
-        if (cached) setLoading(false)
-        fetchFamily(session.user.id)
+      if (!mounted) return
+      const u = session?.user ?? null
+      setUser(u)
+      if (u) {
+        // If cached family exists, stop spinner immediately
+        if (getCachedFamily()) setLoading(false)
+        fetchFamily(u.id)
       } else {
         clearCachedFamily()
         setFamily(null)
@@ -54,13 +53,24 @@ export function useAuth() {
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, session) => {
-        setUser(session?.user ?? null)
-        if (session?.user) await fetchFamily(session.user.id)
-        else { setFamily(null); clearCachedFamily(); setLoading(false) }
+      (_event, session) => {
+        if (!mounted) return
+        const u = session?.user ?? null
+        setUser(u)
+        if (u) {
+          fetchFamily(u.id)
+        } else {
+          setFamily(null)
+          clearCachedFamily()
+          setLoading(false)
+        }
       }
     )
-    return () => subscription.unsubscribe()
+
+    return () => {
+      mounted = false
+      subscription.unsubscribe()
+    }
   }, [fetchFamily])
 
   const signUp = useCallback(async ({ email, password, parentName }) => {
@@ -72,7 +82,8 @@ export function useAuth() {
       .select()
       .single()
     if (familyError) throw familyError
-    await supabase.from('subscriptions').insert({ family_id: familyData.id, plan: 'free', status: 'active' })
+    await supabase.from('subscriptions')
+      .insert({ family_id: familyData.id, plan: 'free', status: 'active' })
     setFamily(familyData)
     setCachedFamily(familyData)
     return { user: data.user, family: familyData }
@@ -81,9 +92,7 @@ export function useAuth() {
   const signIn = useCallback(async ({ email, password }) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) throw error
-    // Eagerly set user so screen can switch immediately
     setUser(data.user)
-    // Fetch family in background — cached version already shown if available
     fetchFamily(data.user.id)
     return data
   }, [fetchFamily])

@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react'
-import { useAuth }   from './hooks/useAuth'
-import { useFamily } from './hooks/useFamily'
+import { useAuth }         from './hooks/useAuth'
+import { useFamily }       from './hooks/useFamily'
 import { useSubscription } from './hooks/useSubscription'
-import { saveOnboarding } from './lib/onboarding'
+import { saveOnboarding }  from './lib/onboarding'
 import { GLOBAL_STYLES, CoinBurst, Toast } from './components/shared'
 import { OnboardingFlow } from './components/OnboardingFlow'
 import { LoginScreen }    from './components/LoginScreen'
@@ -18,7 +18,7 @@ export default function App() {
           redeemReward, markNotificationRead } = useFamily(family?.id)
   const { plan, isPremium } = useSubscription(family?.id)
 
-  const [screen,      setScreen]      = useState('onboarding')
+  const [screen,      setScreen]      = useState('loading')
   const [activeKidId, setActiveKidId] = useState(null)
   const [kidUser,     setKidUser]     = useState(null)
   const [burst,       setBurst]       = useState(null)
@@ -26,45 +26,51 @@ export default function App() {
 
   const showToast = msg => setToast(msg)
 
-  // Redirect as soon as user is known — don't wait for family fetch
+  // Single source of truth for screen routing
   useEffect(() => {
-    if (authLoading && !family) return // only block on true first load
-    if (user) {
+    if (authLoading) return
+    if (user && family) {
       setScreen('app')
-    } else if (!authLoading && !user) {
-      setScreen(prev => prev === 'app' || prev === 'app-kid' ? 'login' : prev)
+    } else if (user && !family) {
+      // Signed in but family not loaded yet — wait a moment
+      setScreen('app')
+    } else {
+      // No user — show onboarding on first visit, login on return
+      const hasVisited = sessionStorage.getItem('cq_visited')
+      setScreen(hasVisited ? 'login' : 'onboarding')
     }
-  }, [user, authLoading])
+  }, [user, family, authLoading])
 
-  // Set active kid once kids load
+  // Set active kid once kids arrive
   useEffect(() => {
-    if (kids.length > 0 && !activeKidId) setActiveKidId(kids[0].id)
+    if (kids.length > 0 && !activeKidId) {
+      setActiveKidId(kids[0].id)
+    }
   }, [kids])
 
-  // Onboarding complete
+  // Mark visited so returning users go to login not onboarding
+  useEffect(() => {
+    sessionStorage.setItem('cq_visited', '1')
+  }, [])
+
   const handleOnboardingComplete = async (result) => {
     if (!result) { setScreen('login'); return }
     try {
       const { family: newFamily } = await signUp({
-        email:      result.email,
-        password:   result.password,
-        parentName: result.parentName,
+        email: result.email, password: result.password, parentName: result.parentName,
       })
       await saveOnboarding({ familyId: newFamily.id, kids: result.kids, selectedChores: result.selectedChores, goals: result.goals })
       await reload()
       setScreen('app')
       showToast(`🎉 Welcome to ChoreQuest, ${result.parentName}!`)
-    } catch (err) {
-      showToast(`❌ ${err.message}`)
-    }
+    } catch (err) { showToast(`❌ ${err.message}`) }
   }
 
   const handleParentLogin = async ({ email, password }) => {
-    const { user: signedInUser } = await signIn({ email, password })
-    // Switch screen immediately — don't wait for useEffect chain
-    // family comes from cache instantly if available, otherwise
-    // useEffect will handle it once fetchFamily resolves
-    if (signedInUser) setScreen('app')
+    try {
+      await signIn({ email, password })
+      setScreen('app')
+    } catch (err) { throw err }
   }
 
   const handleKidLogin = (kid) => {
@@ -77,22 +83,18 @@ export default function App() {
     await signOut()
     setKidUser(null)
     setActiveKidId(null)
-    setScreen('login')
+    sessionStorage.removeItem('cq_visited')
+    setScreen('onboarding')
   }
 
   const handleMarkDone = async (kidId, choreId, e) => {
     const rect = e.currentTarget.getBoundingClientRect()
     setBurst({ x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 })
     try {
-      // Kids log in without a parent Supabase session.
-      // We use the kid object directly from kidUser (set at login time)
-      // which includes family_id from when the parent loaded the kids list.
-      const kidData  = kids.find(k => k.id === kidId) || kidUser
-      const chore    = kidData?.chores?.find(c => c.id === choreId)
-      const famId    = kidData?.family_id || family?.id
-
+      const kidData = kids.find(k => k.id === kidId) || kidUser
+      const chore   = kidData?.chores?.find(c => c.id === choreId)
+      const famId   = kidData?.family_id || family?.id
       if (!famId) { showToast('❌ Session error — please log in again'); return }
-
       await markChorePending(choreId, kidId, kidData?.name, chore?.title, famId)
     } catch (err) { showToast(`❌ ${err.message}`) }
   }
@@ -120,9 +122,7 @@ export default function App() {
     try {
       if (chore.id && typeof chore.id === 'string' && chore.id.length > 10) {
         await updateChore(chore.id, { title: chore.title, icon: chore.icon, coins: chore.coins })
-      } else {
-        await addChore(kidId, chore)
-      }
+      } else { await addChore(kidId, chore) }
     } catch (err) { showToast(`❌ ${err.message}`) }
   }
 
@@ -138,15 +138,14 @@ export default function App() {
 
   const activeKid = kids.find(k => k.id === activeKidId) || kids[0]
 
-  // Only show full-screen loader if we have zero cached data at all
-  // (first ever load). After that, cached data renders instantly.
-  if (authLoading && !family) {
+  // ── Loading screen ────────────────────────────────────────
+  if (screen === 'loading' || authLoading) {
     return (
       <div style={{ minHeight: '100vh', background: '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 16 }}>
         <style>{GLOBAL_STYLES}</style>
+        <style>{`@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.3}}`}</style>
         <div style={{ fontSize: 52, animation: 'pulse 1.5s ease infinite' }}>🏆</div>
         <div style={{ fontFamily: "'Nunito',sans-serif", color: '#475569', fontWeight: 700, fontSize: 14 }}>Loading ChoreQuest...</div>
-        <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }`}</style>
       </div>
     )
   }
@@ -156,9 +155,11 @@ export default function App() {
       <style>{GLOBAL_STYLES}</style>
       {burst && <CoinBurst x={burst.x} y={burst.y} onDone={() => setBurst(null)} />}
       {toast && <Toast msg={toast} onDone={() => setToast(null)} />}
-
       <div className="fade-in" style={{ maxWidth: 430, margin: '0 auto', minHeight: '100vh' }}>
-        {screen === 'onboarding' && <OnboardingFlow onComplete={handleOnboardingComplete} />}
+
+        {screen === 'onboarding' && (
+          <OnboardingFlow onComplete={handleOnboardingComplete} />
+        )}
 
         {screen === 'login' && (
           <LoginScreen
@@ -185,7 +186,7 @@ export default function App() {
           />
         )}
 
-        {screen === 'app' && user && (
+        {screen === 'app' && (
           <ParentView
             data={{ kids, notifications }}
             plan={plan}
