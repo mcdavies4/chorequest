@@ -233,6 +233,21 @@ function ManageTab({ kid, onSaveChore, onDeleteChore, onSaveGoal, showToast }) {
 export function ParentView({ data, onApprove, onReject, onLogout, onMarkRead, onSaveChore, onDeleteChore, onSaveGoal, showToast, activeKidId, setActiveKidId, plan = 'free', isPremium = false, familyId, userEmail }) {
   const [tab, setTab] = useState('home')
   const [checkoutLoading, setCheckoutLoading] = useState(false)
+
+  // Pay link usernames — stored in localStorage so they persist
+  const [cashTag,    setCashTag]    = useState(() => localStorage.getItem('cq_cashtag')    || '')
+  const [paypalName, setPaypalName] = useState(() => localStorage.getItem('cq_paypal')     || '')
+  const [venmoName,  setVenmoName]  = useState(() => localStorage.getItem('cq_venmo')      || '')
+  const [editPay,    setEditPay]    = useState(false)
+
+  const savePayLinks = () => {
+    localStorage.setItem('cq_cashtag', cashTag)
+    localStorage.setItem('cq_paypal',  paypalName)
+    localStorage.setItem('cq_venmo',   venmoName)
+    setEditPay(false)
+    showToast('💸 Pay links saved!')
+  }
+
   const kid = data.kids.find(k => k.id === activeKidId) || data.kids[0]
   if (!kid) return null
 
@@ -359,41 +374,104 @@ export function ParentView({ data, onApprove, onReject, onLogout, onMarkRead, on
             <div style={{ fontFamily: "'Fredoka One',cursive", fontSize: 18, color: '#f59e0b', marginBottom: 6 }}>Pending Approvals ⏳</div>
             <div style={{ background: '#0f172a', border: '1.5px solid #1e3a5f', borderRadius: 12, padding: '10px 14px', marginBottom: 14, display: 'flex', gap: 8 }}>
               <span style={{ fontSize: 16 }}>💡</span>
-              <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, lineHeight: 1.5 }}>Approve to update the balance, then use a <span style={{ color: '#38bdf8' }}>pay link</span> to send real money via Venmo, Cash App, or PayPal.</div>
+              <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, lineHeight: 1.5 }}>Approve to update the balance, then use a <span style={{ color: '#38bdf8' }}>pay link</span> to send real money.</div>
             </div>
             {pending.length === 0
               ? <div style={{ textAlign: 'center', padding: '40px 20px', color: '#475569', fontWeight: 700, fontSize: 14 }}><div style={{ fontSize: 48, marginBottom: 10 }}>🎉</div>All caught up!</div>
               : <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                   {pending.map(chore => {
-                    const amt  = Number(chore.coins).toFixed(2)
-                    const note = encodeURIComponent(`${kid.name}'s chores - ${chore.title} 🏆`)
+                    const amt      = Number(chore.coins).toFixed(2)
+                    const amtNum   = Number(chore.coins)
+                    const noteRaw  = `${kid.name} chores - ${chore.title}`
+                    const noteEnc  = encodeURIComponent(noteRaw)
+
+                    // ── Correct mobile deep links ──────────────────────────
+                    // Venmo: opens app directly on mobile, falls back to web
+                    const venmoUrl    = venmoName
+                      ? `venmo://paycharge?txn=pay&amount=${amt}&note=${noteEnc}&recipients=${venmoName}`
+                      : `https://venmo.com/`
+
+                    // Cash App: $cashtag link — opens app if installed
+                    const cashAppUrl  = cashTag
+                      ? `https://cash.app/$${cashTag.replace('$','')}/${amt}`
+                      : `https://cash.app/`
+
+                    // PayPal: paypal.me link
+                    const paypalUrl   = paypalName
+                      ? `https://paypal.me/${paypalName}/${amt}`
+                      : `https://paypal.com/`
+
                     return (
                       <div key={chore.id} style={{ background: '#1e293b', border: '2px solid #fbbf24', borderRadius: 22, padding: 16, boxShadow: '0 4px 24px #f59e0b22' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
                           <div style={{ fontSize: 30 }}>{chore.icon}</div>
-                          <div style={{ flex: 1 }}><div style={{ fontWeight: 800, color: 'white', fontSize: 15 }}>{chore.title}</div><div style={{ fontSize: 12, color: '#f59e0b', fontWeight: 700 }}>+🪙 ${amt} earned by {kid.name}</div></div>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 800, color: 'white', fontSize: 15 }}>{chore.title}</div>
+                            <div style={{ fontSize: 12, color: '#f59e0b', fontWeight: 700 }}>+🪙 ${amt} for {kid.name}</div>
+                          </div>
                         </div>
+
+                        {/* Approve / Reject */}
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
-                          <button onClick={() => onReject(kid.id, chore.id)} style={{ background: '#ef444415', border: '2px solid #ef4444', borderRadius: 12, padding: 10, fontFamily: "'Fredoka One',cursive", fontSize: 15, color: '#ef4444', cursor: 'pointer' }}>✗ Reject</button>
-                          <button onClick={() => onApprove(kid.id, chore.id)} style={{ background: '#22c55e', border: 'none', borderRadius: 12, padding: 10, fontFamily: "'Fredoka One',cursive", fontSize: 15, color: 'white', cursor: 'pointer', boxShadow: '0 4px 16px #22c55e44' }}>✓ Approve!</button>
+                          <button
+                            onClick={async () => {
+                              try {
+                                await onReject(kid.id, chore.id)
+                              } catch(e) { showToast(`❌ ${e.message}`) }
+                            }}
+                            style={{ background: '#ef444415', border: '2px solid #ef4444', borderRadius: 12, padding: 10, fontFamily: "'Fredoka One',cursive", fontSize: 15, color: '#ef4444', cursor: 'pointer' }}>
+                            ✗ Reject
+                          </button>
+                          <button
+                            onClick={async () => {
+                              try {
+                                await onApprove(kid.id, chore.id)
+                              } catch(e) { showToast(`❌ ${e.message}`) }
+                            }}
+                            style={{ background: '#22c55e', border: 'none', borderRadius: 12, padding: 10, fontFamily: "'Fredoka One',cursive", fontSize: 15, color: 'white', cursor: 'pointer', boxShadow: '0 4px 16px #22c55e44' }}>
+                            ✓ Approve!
+                          </button>
                         </div>
+
                         <div style={{ borderTop: '1.5px solid #334155', marginBottom: 12 }} />
-                        <div style={{ fontSize: 11, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>💸 Send real money — ${amt}</div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 7 }}>
-                          {[
-                            { label: 'Venmo',    color: '#008cff', emoji: '💙', url: `https://venmo.com/?txn=pay&amount=${amt}&note=${note}` },
-                            { label: 'Cash App', color: '#00d64f', emoji: '💚', url: `https://cash.app/pay?amount=${amt}&currency=USD&note=${note}` },
-                            { label: 'PayPal',   color: '#009cde', emoji: '💛', url: `https://www.paypal.com/paypalme/pay?amount=${amt}&currencyCode=USD` },
-                          ].map(p => (
-                            <a key={p.label} href={p.url} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}>
-                              <div style={{ background: `${p.color}15`, border: `1.5px solid ${p.color}`, borderRadius: 12, padding: '9px 4px', textAlign: 'center', cursor: 'pointer' }}>
-                                <div style={{ fontSize: 20, marginBottom: 2 }}>{p.emoji}</div>
-                                <div style={{ fontSize: 11, fontWeight: 800, color: p.color }}>{p.label}</div>
-                                <div style={{ fontSize: 10, color: '#475569', fontWeight: 600 }}>${amt}</div>
-                              </div>
-                            </a>
-                          ))}
+                        <div style={{ fontSize: 11, fontWeight: 800, color: '#64748b', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+                          💸 Send real money — ${amt}
                         </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 7 }}>
+                          {/* Venmo */}
+                          <a href={venmoUrl} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}>
+                            <div style={{ background: '#008cff15', border: '1.5px solid #008cff', borderRadius: 12, padding: '9px 4px', textAlign: 'center', cursor: 'pointer' }}>
+                              <div style={{ fontSize: 20, marginBottom: 2 }}>💙</div>
+                              <div style={{ fontSize: 11, fontWeight: 800, color: '#008cff' }}>Venmo</div>
+                              <div style={{ fontSize: 10, color: '#475569', fontWeight: 600 }}>${amt}</div>
+                            </div>
+                          </a>
+
+                          {/* Cash App */}
+                          <a href={cashAppUrl} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}>
+                            <div style={{ background: '#00d64f15', border: '1.5px solid #00d64f', borderRadius: 12, padding: '9px 4px', textAlign: 'center', cursor: 'pointer' }}>
+                              <div style={{ fontSize: 20, marginBottom: 2 }}>💚</div>
+                              <div style={{ fontSize: 11, fontWeight: 800, color: '#00d64f' }}>Cash App</div>
+                              <div style={{ fontSize: 10, color: '#475569', fontWeight: 600 }}>${amt}</div>
+                            </div>
+                          </a>
+
+                          {/* PayPal */}
+                          <a href={paypalUrl} target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'none' }}>
+                            <div style={{ background: '#009cde15', border: '1.5px solid #009cde', borderRadius: 12, padding: '9px 4px', textAlign: 'center', cursor: 'pointer' }}>
+                              <div style={{ fontSize: 20, marginBottom: 2 }}>💛</div>
+                              <div style={{ fontSize: 11, fontWeight: 800, color: '#009cde' }}>PayPal</div>
+                              <div style={{ fontSize: 10, color: '#475569', fontWeight: 600 }}>${amt}</div>
+                            </div>
+                          </a>
+                        </div>
+
+                        {(!cashTag || !paypalName) && (
+                          <div onClick={() => setTab('manage')} style={{ marginTop: 10, background: '#1e3a5f', border: '1.5px solid #3b82f6', borderRadius: 10, padding: '8px 12px', fontSize: 12, color: '#93c5fd', fontWeight: 600, textAlign: 'center', cursor: 'pointer' }}>
+                            ⚙️ Tap to set up your Cash App & PayPal usernames →
+                          </div>
+                        )}
                       </div>
                     )
                   })}
@@ -402,7 +480,63 @@ export function ParentView({ data, onApprove, onReject, onLogout, onMarkRead, on
           </>
         )}
 
-        {tab === 'manage'      && <ManageTab kid={kid} onSaveChore={onSaveChore} onDeleteChore={onDeleteChore} onSaveGoal={onSaveGoal} showToast={showToast} />}
+        {tab === 'manage' && (
+          <div>
+            {/* Pay Links Settings */}
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                <div style={{ fontFamily: "'Fredoka One',cursive", fontSize: 17, color: '#f59e0b' }}>💸 Pay Links</div>
+                {!editPay && <button onClick={() => setEditPay(true)} style={{ background: '#f59e0b22', border: '1.5px solid #f59e0b', borderRadius: 10, padding: '5px 12px', fontFamily: "'Nunito',sans-serif", fontWeight: 800, fontSize: 12, color: '#f59e0b', cursor: 'pointer' }}>✏️ Edit</button>}
+              </div>
+              {editPay ? (
+                <div style={{ background: '#1e293b', border: '2px solid #f59e0b', borderRadius: 18, padding: 16 }}>
+                  <div style={{ fontSize: 12, color: '#64748b', fontWeight: 600, marginBottom: 14 }}>
+                    Enter your usernames so pay links open directly in the app on your phone.
+                  </div>
+                  {[
+                    { label: 'Venmo Username', placeholder: 'e.g. john-smith', value: venmoName, onChange: setVenmoName, icon: '💙' },
+                    { label: 'Cash App $Cashtag', placeholder: 'e.g. $johnsmith', value: cashTag, onChange: setCashTag, icon: '💚' },
+                    { label: 'PayPal.me Username', placeholder: 'e.g. johnsmith', value: paypalName, onChange: setPaypalName, icon: '💛' },
+                  ].map(f => (
+                    <div key={f.label} style={{ marginBottom: 12 }}>
+                      <label style={{ fontSize: 11, fontWeight: 800, color: '#475569', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span>{f.icon}</span>{f.label}
+                      </label>
+                      <input
+                        style={{ width: '100%', background: '#0f172a', border: '1.5px solid #334155', borderRadius: 12, padding: '11px 14px', color: 'white', fontSize: 14, fontFamily: "'Nunito',sans-serif", fontWeight: 700, outline: 'none', boxSizing: 'border-box' }}
+                        value={f.value}
+                        onChange={e => f.onChange(e.target.value)}
+                        placeholder={f.placeholder}
+                        autoComplete="off"
+                        autoCorrect="off"
+                        autoCapitalize="none"
+                      />
+                    </div>
+                  ))}
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                    <button onClick={() => setEditPay(false)} style={{ background: 'transparent', border: '1.5px solid #334155', borderRadius: 12, padding: 10, fontFamily: "'Nunito',sans-serif", fontWeight: 800, fontSize: 13, color: '#64748b', cursor: 'pointer' }}>Cancel</button>
+                    <button onClick={savePayLinks} style={{ background: '#f59e0b', border: 'none', borderRadius: 12, padding: 10, fontFamily: "'Fredoka One',cursive", fontSize: 15, color: '#1e293b', cursor: 'pointer' }}>Save 💸</button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ background: '#1e293b', border: '1.5px solid #334155', borderRadius: 16, padding: '14px 16px' }}>
+                  {cashTag || paypalName || venmoName ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {venmoName  && <div style={{ fontSize: 13, color: '#94a3b8', fontWeight: 600 }}>💙 Venmo: <span style={{ color: 'white' }}>{venmoName}</span></div>}
+                      {cashTag    && <div style={{ fontSize: 13, color: '#94a3b8', fontWeight: 600 }}>💚 Cash App: <span style={{ color: 'white' }}>${cashTag.replace('$','')}</span></div>}
+                      {paypalName && <div style={{ fontSize: 13, color: '#94a3b8', fontWeight: 600 }}>💛 PayPal: <span style={{ color: 'white' }}>paypal.me/{paypalName}</span></div>}
+                    </div>
+                  ) : (
+                    <div style={{ fontSize: 13, color: '#475569', fontWeight: 600, textAlign: 'center' }}>
+                      No pay links set up yet. Tap Edit to add your usernames.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+            <ManageTab kid={kid} onSaveChore={onSaveChore} onDeleteChore={onDeleteChore} onSaveGoal={onSaveGoal} showToast={showToast} />
+          </div>
+        )}
         {tab === 'summary'     && <><div style={{ fontFamily: "'Fredoka One',cursive", fontSize: 18, color: '#f59e0b', marginBottom: 14 }}>Weekly Report 📋</div><WeeklySummary kid={kid} /></>}
         {tab === 'leaderboard' && <><div style={{ fontFamily: "'Fredoka One',cursive", fontSize: 18, color: '#f59e0b', marginBottom: 14 }}>Leaderboard 🏆</div><Leaderboard kids={data.kids} /></>}
 
